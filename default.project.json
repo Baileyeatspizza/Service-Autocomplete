@@ -1,0 +1,15 @@
+{
+  "name": "Service-Autofil",
+  "tree": {
+    "$className": "DataModel",
+
+    "ServerStorage": {
+      "Auto Completion": {
+        "$className": "Folder",
+        "Source": {
+          "$path": "Plugin"
+        }
+      }
+    }
+  }
+}
