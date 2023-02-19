@@ -262,45 +262,88 @@ local function completionRequested(request: Request, response: Response)
 	return response
 end
 
-local function closeThread()
-	task.defer(task.cancel, coroutine.running())
-	task.wait(5)
-end
-
 local function getFullScript(doc: ScriptDocument)
 	local fullScriptString = ""
+	local rawSource = {}
 
 	for line = 1, doc:GetLineCount() do
 		local lineCode = doc:GetLine(line)
 		if lineCode == nil then
 			continue
 		end
+
+		rawSource[line] = lineCode
+
 		lineCode ..= "\n"
 		fullScriptString ..= lineCode
 	end
 
-	return fullScriptString
+	return fullScriptString, rawSource
 end
 
 local function getAllTokens(doc: ScriptDocument)
-	local fullScriptString = getFullScript(doc)
+	local fullScriptString, rawSource = getFullScript(doc)
+
+	print(rawSource)
+
+	local currentLine = 1
+	local currentCharacter = 1
+
+	-- recursively find the tokens in order
+	local function getLine(token)
+		local lineCode = rawSource[currentLine]
+		print("attempting to find ", token, " in ", lineCode, " at ", currentLine, ":", currentCharacter)
+
+		assert(lineCode, "couldn't find code to compare against")
+
+		print(
+			string.find(
+				'--- ReplicatedStorage = game:GetService("ReplicatedStorage")',
+				'--- ReplicatedStorage = game:GetService("ReplicatedStorage")'
+			)
+		)
+
+		local tokenStart, tokenEnd = string.find(lineCode, token, currentCharacter, true)
+
+		if tokenStart and tokenEnd then
+			currentCharacter = tokenEnd + 1
+			return currentLine, tokenStart, tokenEnd
+		else
+			currentLine += 1
+			currentCharacter = 1
+
+			return getLine(token)
+		end
+	end
 
 	local quickScan = Lexer.scan(fullScriptString)
-
 	local tokens = {}
 
 	repeat
 		local type, token = quickScan()
-		print(type, token)
-
-		if type ~= nil then
-			table.insert(tokens, {
-				type = type,
-				token = token,
-			})
+		if not type then
+			continue
 		end
 
-	until type == nil
+		if string.match(token, "\n") then
+			token = string.sub(token, 1, #token - 1)
+		end
+
+		-- sometimes needs to happen twice
+		if string.match(token, "\n") then
+			token = string.sub(token, 1, #token - 1)
+		end
+
+		local line, startChar, endChar = getLine(token)
+
+		table.insert(tokens, {
+			type = type,
+			token = token,
+			line = line,
+			startChar = startChar,
+			endChar = endChar,
+		})
+	until not type
 
 	return fullScriptString, tokens
 end
@@ -348,41 +391,13 @@ local function findNonCommentLine(doc: ScriptDocument)
 
 	local lineCount = doc:GetLineCount()
 
-	for i = 1, lineCount do
-		local line = doc:GetLine(i)
-		if string.match(line, COMMENTBLOCKSTART) then
-			local foundBlockEnd = false
-			if string.match(line, COMMENTBLOCKEND) then
-				foundBlockEnd = true
-			end
-
-			if not foundBlockEnd then
-				for l = i, lineCount do
-					local nextLine = doc:GetLine(l)
-					if string.match(nextLine, COMMENTBLOCKEND) then
-						foundBlockEnd = true
-						lineAfterComments = l
-						break
-					end
-				end
-			end
-
-			if not foundBlockEnd then
-				warnLog("Couldn't find end of comment block missing: ]]")
-				closeThread()
-			end
-		elseif string.match(line, SINGLELINECOMMENT) then
-			comments = true
-		else
+	for _, token in getAllTokens() do
+		if token.type ~= "comment" then
 			comments = false
+			break
 		end
 
-		if lineAfterComments < i then
-			if not comments then
-				break
-			end
-			lineAfterComments = i
-		end
+		lineAfterComments += 1
 	end
 
 	return lineAfterComments + 1
@@ -419,7 +434,6 @@ local function findAllServices(doc: ScriptDocument, startLine: number?, endLine)
 end
 
 local function processDocChanges(doc: ScriptDocument, change: DocChanges)
-	warn(change)
 	if change.range.start.character ~= CompleteingWordStart and change.range.start.line ~= CompleteingLine then
 		return
 	end
