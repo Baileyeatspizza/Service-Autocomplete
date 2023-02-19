@@ -88,99 +88,9 @@ local function checkIfService(instance)
 	end
 end
 
--- strings are irritating due to the three potential definitions
--- for performance if it looks close enough like the autofil is within the strings
--- it will just cancel out
--- Not accounting for multi line strings due to performance and how little they are used
-local function backTraceStrings(doc: ScriptDocument, line: number, char: number)
-	return false
-end
-
-local function backTraceComments(doc: ScriptDocument, line: number, char: number): boolean
-	local startLine = doc:GetLine(line)
-	local lineCount = doc:GetLineCount()
-
-	-- single line comment blocks
-	if string.find(startLine, COMMENTBLOCKSTART) then
-		local commentBlockEnd = string.find(startLine, COMMENTBLOCKEND)
-
-		if not commentBlockEnd or commentBlockEnd >= char then
-			return true
-		end
-	elseif string.match(startLine, SINGLELINECOMMENT) then
-		return true
-	end
-
-	-- exception if the comment block end is at the start of the line?
-	local exceptionCase = string.find(startLine, COMMENTBLOCKEND)
-	if exceptionCase and char >= exceptionCase then
-		return false
-	end
-
-	local blockStart = nil
-	local blockStartLine = nil
-	local blockEnd = nil
-	local blockEndLine = nil
-
-	for i = line, 1, -1 do
-		local currentLine = doc:GetLine(i)
-
-		blockStart = string.find(currentLine, COMMENTBLOCKSTART)
-
-		if blockStart then
-			local sameLineBlockEnd = string.find(currentLine, COMMENTBLOCKEND)
-
-			if sameLineBlockEnd then
-				return false
-			end
-			blockStartLine = i
-
-			-- do a quick search forward to find it
-
-			for l = i + 1, lineCount do
-				local nextLine = doc:GetLine(l)
-
-				blockEnd = string.find(nextLine, COMMENTBLOCKEND)
-
-				if blockEnd then
-					blockEndLine = l
-					break
-				end
-			end
-
-			break
-		end
-	end
-
-	if not blockStart or not blockEnd then
-		return false
-	end
-
-	if line > blockStartLine and line <= blockEndLine then
-		return true
-	end
-
-	return false
-end
-
-local function hasBackTraces(doc, line, char)
-	if backTraceComments(doc, line, char) then
-		return true
-	end
-	if backTraceStrings(doc, line, char) then
-		return true
-	end
-
-	return false
-end
-
 -- used in a different function so it can return without ruining the callback
 local function addServiceAutocomplete(request: Request, response: Response)
 	local doc = request.textDocument.document
-
-	if hasBackTraces(doc, request.position.line, request.position.character) then
-		return
-	end
 
 	local req = doc:GetLine(request.position.line)
 
@@ -231,7 +141,7 @@ local function addServiceAutocomplete(request: Request, response: Response)
 	for serviceName in potentialMatches do
 		local field: ResponseItem = {
 			label = serviceName,
-			detail = "Get Service " .. serviceName,
+			detail = "Get Service: " .. serviceName,
 			learnMoreLink = LEARNMORELINK .. serviceName,
 		}
 
@@ -246,20 +156,6 @@ local function addServiceAutocomplete(request: Request, response: Response)
 	CompletingDoc = doc
 	CompleteingLine = request.position.line
 	CompleteingWordStart = string.find(req, requestedWord, #req - #requestedWord)
-end
-
-local function completionRequested(request: Request, response: Response)
-	local doc = request.textDocument.document
-	-- can't write to the command bar sadly ;C
-	if doc == nil or doc:IsCommandBar() then
-		return response
-	end
-
-	CompleteingLine = 0
-	CompleteingWordStart = 0
-	addServiceAutocomplete(request, response)
-
-	return response
 end
 
 local function getFullScript(doc: ScriptDocument)
@@ -290,16 +186,9 @@ local function getAllTokens(doc: ScriptDocument)
 	-- recursively find the tokens in order
 	local function getLine(token)
 		local lineCode = rawSource[currentLine]
-		print("attempting to find ", token, " in ", lineCode, " at ", currentLine, ":", currentCharacter)
+		--print("attempting to find ", token, " in ", lineCode, " at ", currentLine, ":", currentCharacter)
 
 		assert(lineCode, "couldn't find code to compare against")
-
-		print(
-			string.find(
-				'--- ReplicatedStorage = game:GetService("ReplicatedStorage")',
-				'--- ReplicatedStorage = game:GetService("ReplicatedStorage")'
-			)
-		)
 
 		local tokenStart, tokenEnd = string.find(lineCode, token, currentCharacter, true)
 
@@ -332,8 +221,6 @@ local function getAllTokens(doc: ScriptDocument)
 			token = string.sub(token, 1, #token - 1)
 		end
 
-		print(string.split(token, "\n"))
-
 		local seperatedLines = string.split(token, "\n")
 		local endLine = nil
 
@@ -348,10 +235,9 @@ local function getAllTokens(doc: ScriptDocument)
 			end
 		end
 
-		print(type)
 		table.insert(tokens, {
 			type = type,
-			token = token,
+			value = token,
 			startLine = line,
 			endLine = endLine,
 			startChar = startChar,
@@ -359,7 +245,7 @@ local function getAllTokens(doc: ScriptDocument)
 		})
 	until not type
 
-	return fullScriptString, tokens
+	return tokens
 end
 
 --[[
@@ -401,25 +287,20 @@ end
 -- using this over the lexer version to easily identify the first line with just whitespace
 local function findNonCommentLine(doc: ScriptDocument)
 	local lineAfterComments = 0
-	local comments = true
-
-	local lineCount = doc:GetLineCount()
 
 	for _, token in getAllTokens(doc) do
 		if token.type ~= "comment" then
-			comments = false
 			break
 		end
 
-		--lineAfterComments = token.
+		lineAfterComments = token.endLine
 	end
 
-	return lineAfterComments + 1
+	-- one line to avoid the comments then another for padding :)
+	return lineAfterComments + 2
 end
 
 local function findAllServices(doc: ScriptDocument, startLine: number?, endLine): { [string]: number }?
-	print(getAllTokens(doc))
-
 	startLine = startLine or 1
 
 	-- we don't account for duplicate services
@@ -428,23 +309,24 @@ local function findAllServices(doc: ScriptDocument, startLine: number?, endLine)
 		--[ServiceName] = lineNumber
 	}
 
-	for i = startLine :: number, endLine do
-		local line = doc:GetLine(i)
-		local match = string.match(line, ":GetService%([%C]+")
+	for _, token in getAllTokens(doc) do
+		if token.startLine < startLine or token.endLine > endLine then
+			continue
+		end
 
-		if match then
-			local closingParenthesis = string.find(match, "%)")
-			match = string.sub(match, 14, closingParenthesis - 2)
+		if token.type == "string" then
+			local cleanValue = string.match(token.value, "%w+")
 
-			services[match] = i
+			if not ServiceNames[cleanValue] then
+				print(token.value)
+				continue
+			end
+
+			services[cleanValue] = token.endLine
 		end
 	end
 
-	if next(services) then
-		return services
-	end
-
-	return {}
+	return services
 end
 
 local function processDocChanges(doc: ScriptDocument, change: DocChanges)
@@ -458,13 +340,6 @@ local function processDocChanges(doc: ScriptDocument, change: DocChanges)
 		return
 	end
 
-	-- for some reason studio ignored the variable on the top line so exit if it exists
-	local firstLineService = doc:GetLine(1)
-	local topService = string.match(firstLineService, "%w+", 6)
-	if serviceName == topService then
-		return
-	end
-
 	CompleteingLine = 0
 	CompleteingWordStart = 0
 
@@ -472,7 +347,10 @@ local function processDocChanges(doc: ScriptDocument, change: DocChanges)
 	local lastServiceLine = 1
 	local lineToComplete = 1
 
-	local existingServices = findAllServices(doc, nil, change.range["end"].line)
+	local existingServices = findAllServices(doc, nil, change.range["end"].line - 1)
+
+	print(existingServices)
+
 	if next(existingServices) then
 		for otherService, line in existingServices do
 			if line > lineToComplete then
@@ -542,11 +420,35 @@ local function onDocChanged(doc: ScriptDocument, changed: { DocChanges })
 	end
 end
 
+local function completionRequested(request: Request, response: Response)
+	local doc = request.textDocument.document
+	-- can't write to the command bar sadly ;C
+	if doc == nil or doc:IsCommandBar() then
+		return response
+	end
+
+	local closestToken = nil
+	local targetLine = request.position.line
+	local targetCharacter = request.position.character
+
+	for _, v in getAllTokens(doc) do
+		if not closestToken then
+			closestToken = v
+		end
+	end
+
+	CompleteingLine = 0
+	CompleteingWordStart = 0
+	addServiceAutocomplete(request, response)
+
+	return response
+end
+
 -- prevent potential overlap for some reason errors if one doesn't exist weird api choice but ok-
 pcall(function()
 	ScriptEditorService:DeregisterAutocompleteCallback(PROCESSNAME)
 end)
-ScriptEditorService:RegisterAutocompleteCallback(PROCESSNAME, 69, completionRequested)
+ScriptEditorService:RegisterAutocompleteCallback(PROCESSNAME, 99, completionRequested)
 ScriptEditorService.TextDocumentDidChange:Connect(onDocChanged)
 
 game.ChildAdded:Connect(checkIfService)
