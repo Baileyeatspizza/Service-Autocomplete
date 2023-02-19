@@ -81,6 +81,14 @@ local function isService(instance)
 		return false
 	end
 
+	-- it shouldn't be possible to create another service
+	local success = pcall(function()
+		return instance.new(instance.ClassName)
+	end)
+	if success then
+		return
+	end
+
 	return game:GetService(instance.ClassName)
 end
 
@@ -353,8 +361,15 @@ local function processDocChanges(doc: ScriptDocument, change: DocChanges)
 		lastServiceLine = lineToComplete + 1
 	end
 
-	if lastServiceLine >= doc:GetLineCount() then
-		lastServiceLine = doc:GetLineCount()
+	local docLineCount = doc:GetLineCount()
+	if lastServiceLine >= docLineCount then
+		lastServiceLine = docLineCount
+	end
+
+	if lineToComplete >= docLineCount then
+		lineToComplete = docLineCount
+	elseif lineToComplete < lastServiceLine then
+		lineToComplete = lastServiceLine + 1
 	end
 
 	if doc:GetLine(lastServiceLine) ~= "" then
