@@ -264,7 +264,6 @@ local function findNonCommentLine(doc: ScriptDocument)
 			break
 		end
 
-		-- one line to avoid the comments then another for padding :)
 		lineAfterComments = token.endLine + 2
 	end
 
@@ -284,12 +283,12 @@ local function findAllServices(doc: ScriptDocument, startLine: number?, endLine)
 		end
 
 		if token.type == "string" then
-			if not ServiceNames[token.value] then
-				--print(token.value)
+			local cleanValue = string.match(token.value, "%w+")
+			if not ServiceNames[cleanValue] then
 				continue
 			end
 
-			services[token.value] = token.endLine
+			services[cleanValue] = token.endLine
 		end
 	end
 
@@ -366,17 +365,17 @@ local function processDocChanges(doc: ScriptDocument, change: DocChanges)
 		lastServiceLine = docLineCount
 	end
 
-	if lineToComplete >= docLineCount then
-		lineToComplete = docLineCount
-	elseif lineToComplete < lastServiceLine then
-		lineToComplete = lastServiceLine + 1
-	end
-
 	if doc:GetLine(lastServiceLine) ~= "" then
 		doc:EditTextAsync("\n", lastServiceLine, 1, 0, 0)
 	end
 
 	local serviceRequire = string.format(SERVICE_DEF, serviceName, serviceName)
+
+	--print(lineToComplete)
+	if lineToComplete < 1 then
+		lineToComplete = 1
+	end
+
 	doc:EditTextAsync(serviceRequire, lineToComplete, 1, 0, 0)
 end
 
