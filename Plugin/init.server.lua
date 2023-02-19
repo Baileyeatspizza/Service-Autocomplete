@@ -5,16 +5,25 @@ local Lexer = require(script.lexer)
 -- service names is not ideal but causes security checks if not used so :/
 local ServiceNames = {}
 
+local PROCESS_NAME = "Service Autocomplete by Baileyeatspizza"
+local LEARN_MORE_LINK = "https://create.roblox.com/docs/reference/engine/classes/"
+local SERVICE_DEF = 'local %s = game:GetService("%s")\n'
+
+local IGNORED_TYPES = {
+	keyword = true,
+	comment = true,
+	string = true,
+}
+local IGNORED_OPERATORS = {
+	["."] = true,
+	[":"] = true,
+	["("] = true,
+	[")"] = true,
+}
+
 local CompletingDoc = nil
 local CompleteingLine = 0
 local CompleteingWordStart = 0
-
-local PROCESSNAME = "Baileyeatspizza - Autocomplete Services"
-local SINGLELINECOMMENT = "%-%-"
-local COMMENTBLOCKSTART = "%-%-%[%["
-local COMMENTBLOCKEND = "%]%]"
-local LEARNMORELINK = "https://create.roblox.com/docs/reference/engine/classes/"
-local SERVICEDEF = 'local %s = game:GetService("%s")\n'
 
 type Request = {
 	position: {
@@ -59,15 +68,13 @@ type DocChanges = {
 	text: string,
 }
 
-local function warnLog(message)
-	warn("[Service Autofill] - " .. message)
-end
-
 local function isService(instance)
 	-- not adding workspace due to the builtin globals
+	--[[
 	if instance.ClassName == "Workspace" then
 		return false
 	end
+	]]
 
 	-- avoid unnamed instances
 	if instance.Name == "Instance" then
@@ -93,30 +100,12 @@ local function addServiceAutocomplete(request: Request, response: Response)
 	local doc = request.textDocument.document
 
 	local req = doc:GetLine(request.position.line)
-
 	req = string.sub(req, 1, request.position.character - 1)
 
 	local requestedWord = string.match(req, "[%w]+$")
 
-	local statementStart, variableStatement = string.find(req, "local " .. (requestedWord or ""))
-
-	if variableStatement and #string.sub(req, statementStart, variableStatement) >= #req then
-		return
-	end
-
 	-- no text found
 	if requestedWord == nil then
-		return
-	end
-
-	local beforeRequest = string.sub(req, 1, #req - #requestedWord)
-
-	if string.sub(beforeRequest, #beforeRequest, #beforeRequest) == "." then
-		return
-	end
-
-	-- TODO: improve with better string checks
-	if string.match(beforeRequest, "'") or string.match(beforeRequest, '"') then
 		return
 	end
 
@@ -133,7 +122,7 @@ local function addServiceAutocomplete(request: Request, response: Response)
 		-- likely that its defined
 		if potentialMatches[v.label] then
 			-- append a leanMoreLink to the builtin one (this is embarassing LOL)
-			v.learnMoreLink = LEARNMORELINK .. v.label
+			v.learnMoreLink = LEARN_MORE_LINK .. v.label
 			potentialMatches[v.label] = nil
 		end
 	end
@@ -142,7 +131,7 @@ local function addServiceAutocomplete(request: Request, response: Response)
 		local field: ResponseItem = {
 			label = serviceName,
 			detail = "Get Service: " .. serviceName,
-			learnMoreLink = LEARNMORELINK .. serviceName,
+			learnMoreLink = LEARN_MORE_LINK .. serviceName,
 		}
 
 		table.insert(response.items, field)
@@ -177,8 +166,14 @@ local function getFullScript(doc: ScriptDocument)
 	return fullScriptString, rawSource
 end
 
+local cachedTokens = {}
 local function getAllTokens(doc: ScriptDocument)
 	local fullScriptString, rawSource = getFullScript(doc)
+
+	local cached = cachedTokens[rawSource]
+	if cached then
+		return cached
+	end
 
 	local currentLine = 1
 	local currentCharacter = 1
@@ -245,46 +240,14 @@ local function getAllTokens(doc: ScriptDocument)
 		})
 	until not type
 
+	cachedTokens[rawSource] = tokens
+	task.delay(10, function()
+		cachedTokens[rawSource] = nil
+	end)
+
 	return tokens
 end
 
---[[
-local function findNonCommentLine(doc: ScriptDocument)
-	local scriptString, tokens = getAllTokens(doc)
-
-	local ModifiedScriptString = scriptString
-
-	for _, v in tokens do
-		print(v)
-		if v.type ~= "comment" then
-			break
-		end
-
-		local _, endOfToken = string.find(ModifiedScriptString, v.token, 1, true)
-
-		warn(endOfToken)
-
-		if endOfToken then
-			ModifiedScriptString = string.sub(ModifiedScriptString, endOfToken)
-			print(ModifiedScriptString)
-		else
-			warn("couldn't find ", endOfToken)
-		end
-	end
-
-	print(ModifiedScriptString)
-
-	-- eliminates the last whitespace from the query
-	local oldLineCount = #string.split(scriptString, "\n")
-	local newLineCount = #string.split(ModifiedScriptString, "\n")
-
-	print(oldLineCount, newLineCount)
-
-	return (oldLineCount - newLineCount)
-end
-]]
-
--- using this over the lexer version to easily identify the first line with just whitespace
 local function findNonCommentLine(doc: ScriptDocument)
 	local lineAfterComments = 0
 
@@ -293,18 +256,16 @@ local function findNonCommentLine(doc: ScriptDocument)
 			break
 		end
 
-		lineAfterComments = token.endLine
+		-- one line to avoid the comments then another for padding :)
+		lineAfterComments = token.endLine + 2
 	end
 
-	-- one line to avoid the comments then another for padding :)
-	return lineAfterComments + 2
+	return lineAfterComments
 end
 
 local function findAllServices(doc: ScriptDocument, startLine: number?, endLine): { [string]: number }?
 	startLine = startLine or 1
 
-	-- we don't account for duplicate services
-	-- that is user error if it occurs
 	local services = {
 		--[ServiceName] = lineNumber
 	}
@@ -315,14 +276,12 @@ local function findAllServices(doc: ScriptDocument, startLine: number?, endLine)
 		end
 
 		if token.type == "string" then
-			local cleanValue = string.match(token.value, "%w+")
-
-			if not ServiceNames[cleanValue] then
-				print(token.value)
+			if not ServiceNames[token.value] then
+				--print(token.value)
 				continue
 			end
 
-			services[cleanValue] = token.endLine
+			services[token.value] = token.endLine
 		end
 	end
 
@@ -349,7 +308,7 @@ local function processDocChanges(doc: ScriptDocument, change: DocChanges)
 
 	local existingServices = findAllServices(doc, nil, change.range["end"].line - 1)
 
-	print(existingServices)
+	--print(existingServices)
 
 	if next(existingServices) then
 		for otherService, line in existingServices do
@@ -387,7 +346,7 @@ local function processDocChanges(doc: ScriptDocument, change: DocChanges)
 		lastServiceLine += 1
 	else
 		lineToComplete = findNonCommentLine(doc)
-		warn("Non comment line = ", lineToComplete)
+		--warn("Non comment line = ", lineToComplete)
 	end
 
 	if lastServiceLine == 1 then
@@ -402,7 +361,7 @@ local function processDocChanges(doc: ScriptDocument, change: DocChanges)
 		doc:EditTextAsync("\n", lastServiceLine, 1, 0, 0)
 	end
 
-	local serviceRequire = string.format(SERVICEDEF, serviceName, serviceName)
+	local serviceRequire = string.format(SERVICE_DEF, serviceName, serviceName)
 	doc:EditTextAsync(serviceRequire, lineToComplete, 1, 0, 0)
 end
 
@@ -453,13 +412,13 @@ local function completionRequested(request: Request, response: Response)
 		end
 	end
 
-	warn(closestToken)
+	--warn(closestToken)
 
 	if closestToken.type == "operator" then
-		if closestToken.value == "(" or closestToken.value == ")" or closestToken.value == "." then
+		if IGNORED_OPERATORS[closestToken.value] then
 			return response
 		end
-	elseif closestToken.type == "keyword" or closestToken.type == "comment" then
+	elseif IGNORED_TYPES[closestToken.type] then
 		return response
 	end
 
@@ -471,10 +430,8 @@ local function completionRequested(request: Request, response: Response)
 end
 
 -- prevent potential overlap for some reason errors if one doesn't exist weird api choice but ok-
-pcall(function()
-	ScriptEditorService:DeregisterAutocompleteCallback(PROCESSNAME)
-end)
-ScriptEditorService:RegisterAutocompleteCallback(PROCESSNAME, 99, completionRequested)
+pcall(ScriptEditorService.DeregisterAutocompleteCallback, ScriptEditorService, PROCESS_NAME)
+ScriptEditorService:RegisterAutocompleteCallback(PROCESS_NAME, 99, completionRequested)
 ScriptEditorService.TextDocumentDidChange:Connect(onDocChanged)
 
 game.ChildAdded:Connect(checkIfService)
