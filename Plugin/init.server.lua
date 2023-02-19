@@ -284,8 +284,6 @@ end
 local function getAllTokens(doc: ScriptDocument)
 	local fullScriptString, rawSource = getFullScript(doc)
 
-	print(rawSource)
-
 	local currentLine = 1
 	local currentCharacter = 1
 
@@ -334,12 +332,28 @@ local function getAllTokens(doc: ScriptDocument)
 			token = string.sub(token, 1, #token - 1)
 		end
 
-		local line, startChar, endChar = getLine(token)
+		print(string.split(token, "\n"))
 
+		local seperatedLines = string.split(token, "\n")
+		local endLine = nil
+
+		local line, startChar, endChar
+
+		for _, splitToken in seperatedLines do
+			if not startChar then
+				line, startChar, endChar = getLine(splitToken)
+				endLine = line
+			else
+				endLine, _, endChar = getLine(splitToken)
+			end
+		end
+
+		print(type)
 		table.insert(tokens, {
 			type = type,
 			token = token,
-			line = line,
+			startLine = line,
+			endLine = endLine,
 			startChar = startChar,
 			endChar = endChar,
 		})
@@ -391,13 +405,13 @@ local function findNonCommentLine(doc: ScriptDocument)
 
 	local lineCount = doc:GetLineCount()
 
-	for _, token in getAllTokens() do
+	for _, token in getAllTokens(doc) do
 		if token.type ~= "comment" then
 			comments = false
 			break
 		end
 
-		lineAfterComments += 1
+		--lineAfterComments = token.
 	end
 
 	return lineAfterComments + 1
