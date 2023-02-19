@@ -427,14 +427,40 @@ local function completionRequested(request: Request, response: Response)
 		return response
 	end
 
-	local closestToken = nil
 	local targetLine = request.position.line
 	local targetCharacter = request.position.character
 
+	local tokens = getAllTokens(doc)
+	local closestToken = tokens[1]
+
 	for _, v in getAllTokens(doc) do
-		if not closestToken then
+		if v.startLine <= targetLine then
+			if v.startLine == closestToken.startLine then
+				if v.startChar > closestToken.startChar and v.startChar < targetCharacter then
+					if v.type == "iden" then
+						continue
+					end
+
+					closestToken = v
+				end
+				continue
+			end
 			closestToken = v
 		end
+
+		if v.startLine > targetLine then
+			break
+		end
+	end
+
+	warn(closestToken)
+
+	if closestToken.type == "operator" then
+		if closestToken.value == "(" or closestToken.value == ")" or closestToken.value == "." then
+			return response
+		end
+	elseif closestToken.type == "keyword" or closestToken.type == "comment" then
+		return response
 	end
 
 	CompleteingLine = 0
