@@ -447,7 +447,26 @@ end
 -- prevent potential overlap for some reason errors if one doesn't exist weird api choice but ok-
 pcall(ScriptEditorService.DeregisterAutocompleteCallback, ScriptEditorService, PROCESS_NAME)
 ScriptEditorService:RegisterAutocompleteCallback(PROCESS_NAME, 99, completionRequested)
-ScriptEditorService.TextDocumentDidChange:Connect(onDocChanged)
+
+local outputted = false
+while true do
+	local success, err = pcall(function()
+		ScriptEditorService.TextDocumentDidChange:Connect(onDocChanged)
+	end)
+
+	if success then
+		break
+	end
+
+	if not outputted then
+		if string.match(err, "denied script") then
+			warn("Script injection permissions are needed for the plugin to run please enable them in settings")
+			outputted = true
+		end
+	end
+
+	task.wait(0.1)
+end
 
 game.ChildAdded:Connect(checkIfService)
 game.ChildRemoved:Connect(checkIfService)
