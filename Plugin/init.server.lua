@@ -17,7 +17,7 @@ local IGNORED_TYPES = {
 local IGNORED_OPERATORS = {
 	["."] = true,
 	[":"] = true,
-	["("] = true,
+	["("] = false,
 	[")"] = true,
 }
 
@@ -271,7 +271,7 @@ local function findNonCommentLine(doc: ScriptDocument)
 end
 
 local function findAllServices(doc: ScriptDocument, startLine: number?, endLine): { [string]: number }?
-	startLine = startLine or 1
+	startLine = startLine or 0
 
 	local services = {
 		--[ServiceName] = lineNumber
@@ -315,18 +315,16 @@ local function processDocChanges(doc: ScriptDocument, change: DocChanges)
 
 	local existingServices = findAllServices(doc, nil, change.range["end"].line - 1)
 
-	--print(existingServices)
-
 	if next(existingServices) then
 		for otherService, line in existingServices do
+			-- hit a bug where its trying to dup a service
+			if otherService == serviceName then
+				return
+			end
+
 			if line > lineToComplete then
 				if serviceName > otherService then
 					lineToComplete = line
-				end
-
-				-- hit a bug where its trying to dup a service
-				if otherService == serviceName then
-					return
 				end
 
 				lastServiceLine = line
@@ -405,35 +403,50 @@ local function completionRequested(request: Request, response: Response)
 
 	local tokens = getAllTokens(doc)
 	local closestToken = tokens[1]
+	local secondClosest = tokens[1]
 
 	for _, v in getAllTokens(doc) do
+		if v.type == "iden" then
+			continue
+		end
+
 		if v.startLine <= targetLine then
 			if v.startLine == closestToken.startLine then
 				if v.startChar > closestToken.startChar and v.startChar < targetCharacter then
-					if v.type == "iden" then
-						continue
+					if v.type == "operator" then
+						if string.find(v.value, ",") then
+							continue
+						end
 					end
 
+					secondClosest = closestToken
 					closestToken = v
 				end
 				continue
 			end
 			closestToken = v
-		end
-
-		if v.startLine > targetLine then
+		else
 			break
 		end
 	end
 
 	--warn(closestToken)
 
-	if closestToken.type == "operator" then
-		if IGNORED_OPERATORS[closestToken.value] then
+	-- assume there aren't any problems if the last token is on a seperate line
+	if not (closestToken.endLine < targetLine) then
+		if closestToken.type == "operator" then
+			if closestToken.value == "(" and secondClosest.type == "keyword" then
+				if string.find(secondClosest.value, "function") then
+					return response
+				end
+			end
+
+			if IGNORED_OPERATORS[closestToken.value] then
+				return response
+			end
+		elseif IGNORED_TYPES[closestToken.type] then
 			return response
 		end
-	elseif IGNORED_TYPES[closestToken.type] then
-		return response
 	end
 
 	CompleteingLine = 0
