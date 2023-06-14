@@ -9,6 +9,15 @@ local PROCESS_NAME = "Service Autocomplete by Baileyeatspizza"
 local LEARN_MORE_LINK = "https://create.roblox.com/docs/reference/engine/classes/"
 local SERVICE_DEF = 'local %s = game:GetService("%s")\n'
 
+local CHECKED_GLOBAL_VARIABLES = {
+	print = Enum.CompletionItemKind.Function,
+	_G = Enum.CompletionItemKind.Variable,
+	_VERSION = Enum.CompletionItemKind.Variable,
+	Vector3 = Enum.CompletionItemKind.Struct,
+	CFrame = Enum.CompletionItemKind.Struct,
+}
+
+--[[
 local IGNORED_TYPES = {
 	keyword = true,
 	comment = true,
@@ -20,6 +29,7 @@ local IGNORED_OPERATORS = {
 	["("] = false,
 	[")"] = true,
 }
+]]
 
 local CompletingDoc = nil
 local CompleteingLine = 0
@@ -69,22 +79,18 @@ type DocChanges = {
 }
 
 local function isService(instance)
-	-- not adding workspace due to the builtin globals
-	--[[
-	if instance.ClassName == "Workspace" then
-		return false
-	end
-	]]
-
 	-- avoid unnamed instances
 	if instance.Name == "Instance" then
 		return false
 	end
 
 	-- it shouldn't be possible to create another service
+	-- prevents highest level user made instances from appearing
+	-- new instance should be cleared by garbage collector
 	local success = pcall(function()
 		return instance.new(instance.ClassName)
 	end)
+
 	if success then
 		return
 	end
@@ -113,7 +119,7 @@ local function addServiceAutocomplete(request: Request, response: Response)
 	local requestedWord = string.match(req, "[%w]+$")
 
 	-- no text found
-	if requestedWord == nil then
+	if not requestedWord then
 		return
 	end
 
@@ -391,13 +397,29 @@ local function onDocChanged(doc: ScriptDocument, changed: { DocChanges })
 	end
 end
 
-local function completionRequested(request: Request, response: Response)
-	local doc = request.textDocument.document
-	-- can't write to the command bar sadly ;C
-	if doc == nil or doc:IsCommandBar() then
-		return response
+local function updateResponse(request: Request, response: Response)
+	--warn(#response.items)
+	local isGlobalScope = false
+	for _, v in response.items do
+		--print(v.label, v.kind, v.preselect)
+
+		local expectedKind = CHECKED_GLOBAL_VARIABLES[v.label]
+		if expectedKind then
+			if v.kind ~= expectedKind then
+				continue
+			end
+
+			isGlobalScope = true
+			break
+		end
 	end
 
+	if not isGlobalScope then
+		--warn("Couldn't find global variables")
+		return
+	end
+
+	--[[
 	local targetLine = request.position.line
 	local targetCharacter = request.position.character
 
@@ -448,10 +470,23 @@ local function completionRequested(request: Request, response: Response)
 			return response
 		end
 	end
+	]]
 
 	CompleteingLine = 0
 	CompleteingWordStart = 0
 	addServiceAutocomplete(request, response)
+end
+
+local function completionRequested(request: Request, response: Response)
+	local doc = request.textDocument.document
+	-- can't write to the command bar sadly ;C
+	if doc == nil or doc:IsCommandBar() then
+		return response
+	end
+
+	-- shares the response to another function
+	-- prevents the error where response isn't returned
+	updateResponse(request, response)
 
 	return response
 end
@@ -477,7 +512,7 @@ while true do
 		end
 	end
 
-	task.wait(0.1)
+	task.wait(1)
 end
 
 game.ChildAdded:Connect(checkIfService)
