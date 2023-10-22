@@ -397,9 +397,7 @@ local function onDocChanged(doc: ScriptDocument, changed: { DocChanges })
 	end
 end
 
-local function updateResponse(request: Request, response: Response)
-	--warn(#response.items)
-	local isGlobalScope = false
+local function checkGlobalScope(response)
 	for _, v in response.items do
 		--print(v.label, v.kind, v.preselect)
 
@@ -409,13 +407,17 @@ local function updateResponse(request: Request, response: Response)
 				continue
 			end
 
-			isGlobalScope = true
-			break
+			return true
 		end
 	end
 
-	if not isGlobalScope then
-		--warn("Couldn't find global variables")
+	return false
+end
+
+local function updateResponse(request: Request, response: Response)
+	local isGloballyScoped = checkGlobalScope(response)
+
+	if not isGloballyScoped then
 		return
 	end
 
