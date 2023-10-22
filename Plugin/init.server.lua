@@ -17,20 +17,6 @@ local CHECKED_GLOBAL_VARIABLES = {
 	CFrame = Enum.CompletionItemKind.Struct,
 }
 
---[[
-local IGNORED_TYPES = {
-	keyword = true,
-	comment = true,
-	string = true,
-}
-local IGNORED_OPERATORS = {
-	["."] = true,
-	[":"] = true,
-	["("] = false,
-	[")"] = true,
-}
-]]
-
 local CompletingDoc = nil
 local CompleteingLine = 0
 local CompleteingWordStart = 0
@@ -369,9 +355,25 @@ local function processDocChanges(doc: ScriptDocument, change: DocChanges)
 		lastServiceLine = docLineCount
 	end
 
-	if doc:GetLine(lastServiceLine) ~= "" then
-		doc:EditTextAsync("\n", lastServiceLine, 1, 0, 0)
-	end
+	--if doc:GetLine(lastServiceLine) ~= "" then
+	--doc:EditTextAsync("\n", lastServiceLine, 1, 0, 0)
+	ScriptEditorService:UpdateSourceAsync(doc:GetScript(), function(newSource)
+		local lines = string.split(newSource, "\n")
+
+		-- replace the chosen line with whitespace
+		if lines[lastServiceLine] ~= "" then
+			table.insert(lines, lastServiceLine, "")
+		end
+
+		-- rebuild the source code
+		local modifiedSource = ""
+		for _, v in lines do
+			modifiedSource ..= v .. "\n"
+		end
+
+		return modifiedSource
+	end)
+	--end
 
 	local serviceRequire = string.format(SERVICE_DEF, serviceName, serviceName)
 
@@ -380,7 +382,25 @@ local function processDocChanges(doc: ScriptDocument, change: DocChanges)
 		lineToComplete = 1
 	end
 
-	doc:EditTextAsync(serviceRequire, lineToComplete, 1, 0, 0)
+	ScriptEditorService:UpdateSourceAsync(doc:GetScript(), function(newSource)
+		local lines = string.split(newSource, "\n")
+
+		if lines[lineToComplete] ~= "" then
+			table.insert(lines, lineToComplete, "")
+		end
+
+		lines[lineToComplete] = serviceRequire
+
+		-- rebuild the source code
+		local modifiedSource = ""
+		for _, v in lines do
+			modifiedSource ..= v .. "\n"
+		end
+
+		return modifiedSource
+	end)
+
+	--doc:EditTextAsync(serviceRequire, lineToComplete, 1, 0, 0)
 end
 
 local function onDocChanged(doc: ScriptDocument, changed: { DocChanges })
