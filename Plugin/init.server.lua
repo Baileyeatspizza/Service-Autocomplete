@@ -17,6 +17,20 @@ local CHECKED_GLOBAL_VARIABLES = {
 	CFrame = Enum.CompletionItemKind.Struct,
 }
 
+--[[
+local IGNORED_TYPES = {
+	keyword = true,
+	comment = true,
+	string = true,
+}
+local IGNORED_OPERATORS = {
+	["."] = true,
+	[":"] = true,
+	["("] = false,
+	[")"] = true,
+}
+]]
+
 local CompletingDoc = nil
 local CompleteingLine = 0
 local CompleteingWordStart = 0
@@ -132,6 +146,20 @@ local function addServiceAutocomplete(request: Request, response: Response)
 			label = serviceName,
 			detail = "Get Service: " .. serviceName,
 			learnMoreLink = LEARN_MORE_LINK .. serviceName,
+		}
+
+		field.textEdit = {
+			newText = serviceName,
+			replace = {
+				start = {
+					line = request.position.line,
+					character = request.position.character - #requestedWord,
+				},
+				["end"] = {
+					line = request.position.line,
+					character = request.position.character,
+				},
+			},
 		}
 
 		table.insert(response.items, field)
@@ -309,12 +337,13 @@ local function processDocChanges(doc: ScriptDocument, change: DocChanges)
 
 	if next(existingServices) then
 		for otherService, line in existingServices do
-			-- hit a bug where its trying to dup a service
+			-- hit a bug where its trying to duplicate a service
 			if otherService == serviceName then
 				return
 			end
 
 			if line > lineToComplete then
+				-- sorting operator
 				if serviceName > otherService then
 					lineToComplete = line
 				end
@@ -343,7 +372,6 @@ local function processDocChanges(doc: ScriptDocument, change: DocChanges)
 		lastServiceLine += 1
 	else
 		lineToComplete = findNonCommentLine(doc)
-		--warn("Non comment line = ", lineToComplete)
 	end
 
 	if lastServiceLine == 1 then
@@ -355,52 +383,17 @@ local function processDocChanges(doc: ScriptDocument, change: DocChanges)
 		lastServiceLine = docLineCount
 	end
 
-	--if doc:GetLine(lastServiceLine) ~= "" then
-	--doc:EditTextAsync("\n", lastServiceLine, 1, 0, 0)
-	ScriptEditorService:UpdateSourceAsync(doc:GetScript(), function(newSource)
-		local lines = string.split(newSource, "\n")
-
-		-- replace the chosen line with whitespace
-		if lines[lastServiceLine] ~= "" then
-			table.insert(lines, lastServiceLine, "")
-		end
-
-		-- rebuild the source code
-		local modifiedSource = ""
-		for _, v in lines do
-			modifiedSource ..= v .. "\n"
-		end
-
-		return modifiedSource
-	end)
-	--end
+	if doc:GetLine(lastServiceLine) ~= "" then
+		doc:EditTextAsync("\n", lastServiceLine, 1, 0, 0)
+	end
 
 	local serviceRequire = string.format(SERVICE_DEF, serviceName, serviceName)
 
-	--print(lineToComplete)
 	if lineToComplete < 1 then
 		lineToComplete = 1
 	end
 
-	ScriptEditorService:UpdateSourceAsync(doc:GetScript(), function(newSource)
-		local lines = string.split(newSource, "\n")
-
-		if lines[lineToComplete] ~= "" then
-			table.insert(lines, lineToComplete, "")
-		end
-
-		lines[lineToComplete] = serviceRequire
-
-		-- rebuild the source code
-		local modifiedSource = ""
-		for _, v in lines do
-			modifiedSource ..= v .. "\n"
-		end
-
-		return modifiedSource
-	end)
-
-	--doc:EditTextAsync(serviceRequire, lineToComplete, 1, 0, 0)
+	doc:EditTextAsync(serviceRequire, lineToComplete, 1, 0, 0)
 end
 
 local function onDocChanged(doc: ScriptDocument, changed: { DocChanges })
@@ -419,8 +412,6 @@ end
 
 local function checkGlobalScope(response)
 	for _, v in response.items do
-		--print(v.label, v.kind, v.preselect)
-
 		local expectedKind = CHECKED_GLOBAL_VARIABLES[v.label]
 		if expectedKind then
 			if v.kind ~= expectedKind then
@@ -440,59 +431,6 @@ local function updateResponse(request: Request, response: Response)
 	if not isGloballyScoped then
 		return
 	end
-
-	--[[
-	local targetLine = request.position.line
-	local targetCharacter = request.position.character
-
-	local tokens = getAllTokens(doc)
-	local closestToken = tokens[1]
-	local secondClosest = tokens[1]
-
-	for _, v in getAllTokens(doc) do
-		if v.type == "iden" then
-			continue
-		end
-
-		if v.startLine <= targetLine then
-			if v.startLine == closestToken.startLine then
-				if v.startChar > closestToken.startChar and v.startChar < targetCharacter then
-					if v.type == "operator" then
-						if string.find(v.value, ",") then
-							continue
-						end
-					end
-
-					secondClosest = closestToken
-					closestToken = v
-				end
-				continue
-			end
-			closestToken = v
-		else
-			break
-		end
-	end
-
-	--warn(closestToken)
-
-	-- assume there aren't any problems if the last token is on a seperate line
-	if not (closestToken.endLine < targetLine) then
-		if closestToken.type == "operator" then
-			if closestToken.value == "(" and secondClosest.type == "keyword" then
-				if string.find(secondClosest.value, "function") then
-					return response
-				end
-			end
-
-			if IGNORED_OPERATORS[closestToken.value] then
-				return response
-			end
-		elseif IGNORED_TYPES[closestToken.type] then
-			return response
-		end
-	end
-	]]
 
 	CompleteingLine = 0
 	CompleteingWordStart = 0
@@ -542,3 +480,7 @@ game.ChildRemoved:Connect(checkIfService)
 for _, v in game:GetChildren() do
 	checkIfService(v)
 end
+
+plugin.Unloading:Connect(function()
+	pcall(ScriptEditorService.DeregisterAutocompleteCallback, ScriptEditorService, PROCESS_NAME)
+end)
