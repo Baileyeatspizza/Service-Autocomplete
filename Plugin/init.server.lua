@@ -1,6 +1,7 @@
 local ScriptEditorService = game:GetService("ScriptEditorService")
 
 local Lexer = require(script.lexer)
+local Settings = require(script.Settings)(plugin)
 
 -- service names is not ideal but causes security checks if not used so :/
 local ServiceNames = {}
@@ -16,20 +17,6 @@ local CHECKED_GLOBAL_VARIABLES = {
 	Vector3 = Enum.CompletionItemKind.Struct,
 	CFrame = Enum.CompletionItemKind.Struct,
 }
-
---[[
-local IGNORED_TYPES = {
-	keyword = true,
-	comment = true,
-	string = true,
-}
-local IGNORED_OPERATORS = {
-	["."] = true,
-	[":"] = true,
-	["("] = false,
-	[")"] = true,
-}
-]]
 
 local CompletingDoc = nil
 local CompleteingLine = 0
@@ -142,13 +129,13 @@ local function addServiceAutocomplete(request: Request, response: Response)
 	end
 
 	for serviceName in potentialMatches do
-		local field: ResponseItem = {
+		local responseItem: ResponseItem = {
 			label = serviceName,
 			detail = "Get Service: " .. serviceName,
 			learnMoreLink = LEARN_MORE_LINK .. serviceName,
 		}
 
-		field.textEdit = {
+		responseItem.textEdit = {
 			newText = serviceName,
 			replace = {
 				start = {
@@ -162,7 +149,7 @@ local function addServiceAutocomplete(request: Request, response: Response)
 			},
 		}
 
-		table.insert(response.items, field)
+		table.insert(response.items, responseItem)
 	end
 
 	-- don't update if theres no matches
@@ -209,8 +196,6 @@ local function getAllTokens(doc: ScriptDocument)
 	-- recursively find the tokens in order
 	local function getLine(token)
 		local lineCode = rawSource[currentLine]
-		--print("attempting to find ", token, " in ", lineCode, " at ", currentLine, ":", currentCharacter)
-
 		assert(lineCode, "couldn't find code to compare against")
 
 		local tokenStart, tokenEnd = string.find(lineCode, token, currentCharacter, true)
@@ -332,6 +317,7 @@ local function processDocChanges(doc: ScriptDocument, change: DocChanges)
 	local firstServiceLine = 99999
 	local lastServiceLine = 1
 	local lineToComplete = 1
+	local moved = false
 
 	local existingServices = findAllServices(doc, nil, change.range["end"].line - 1)
 
@@ -342,10 +328,11 @@ local function processDocChanges(doc: ScriptDocument, change: DocChanges)
 				return
 			end
 
-			if line > lineToComplete then
+			if line >= lineToComplete then
 				-- sorting operator
-				if serviceName > otherService then
+				if Settings:CompareServices(serviceName, otherService) then
 					lineToComplete = line
+					moved = true
 				end
 
 				lastServiceLine = line
@@ -364,7 +351,7 @@ local function processDocChanges(doc: ScriptDocument, change: DocChanges)
 		end
 
 		-- hasn't changed default to the lowest
-		if lineToComplete == 1 then
+		if lineToComplete == 1 and not moved then
 			lineToComplete = firstServiceLine - 1
 		end
 
@@ -453,7 +440,7 @@ end
 
 -- prevent potential overlap for some reason errors if one doesn't exist weird api choice but ok-
 pcall(ScriptEditorService.DeregisterAutocompleteCallback, ScriptEditorService, PROCESS_NAME)
-ScriptEditorService:RegisterAutocompleteCallback(PROCESS_NAME, 99, completionRequested)
+ScriptEditorService:RegisterAutocompleteCallback(PROCESS_NAME, 10, completionRequested)
 
 local outputted = false
 while true do
