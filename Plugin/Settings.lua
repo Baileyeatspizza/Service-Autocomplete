@@ -11,6 +11,9 @@ local ServiceSortingTypes = {
 	["Length"] = function(current, contender)
 		return #current > #contender
 	end,
+	["InverseLength"] = function(current, contender)
+		return #current < #contender
+	end,
 }
 
 function Settings:CompareServices(a, b)

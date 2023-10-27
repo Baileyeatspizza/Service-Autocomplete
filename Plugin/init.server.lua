@@ -314,7 +314,7 @@ local function processDocChanges(doc: ScriptDocument, change: DocChanges)
 	CompleteingLine = 0
 	CompleteingWordStart = 0
 
-	local firstServiceLine = 99999
+	local firstServiceLine = math.huge
 	local lastServiceLine = 1
 	local lineToComplete = 1
 	local moved = false
@@ -374,12 +374,11 @@ local function processDocChanges(doc: ScriptDocument, change: DocChanges)
 		doc:EditTextAsync("\n", lastServiceLine, 1, 0, 0)
 	end
 
-	local serviceRequire = string.format(SERVICE_DEF, serviceName, serviceName)
-
 	if lineToComplete < 1 then
 		lineToComplete = 1
 	end
 
+	local serviceRequire = string.format(SERVICE_DEF, serviceName, serviceName)
 	doc:EditTextAsync(serviceRequire, lineToComplete, 1, 0, 0)
 end
 
