@@ -384,11 +384,7 @@ local function processDocChanges(doc: ScriptDocument, change: DocChanges)
 end
 
 local function onDocChanged(doc: ScriptDocument, changed: { DocChanges })
-	if doc:IsCommandBar() then
-		return
-	end
-
-	if doc ~= CompletingDoc then
+	if doc:IsCommandBar() or doc ~= CompletingDoc then
 		return
 	end
 
@@ -397,7 +393,7 @@ local function onDocChanged(doc: ScriptDocument, changed: { DocChanges })
 	end
 end
 
-local function checkGlobalScope(response)
+local function updateResponse(request: Request, response: Response)
 	for _, v in response.items do
 		local expectedKind = CHECKED_GLOBAL_VARIABLES[v.label]
 		if expectedKind then
@@ -405,34 +401,21 @@ local function checkGlobalScope(response)
 				continue
 			end
 
-			return true
+			CompleteingLine = 0
+			CompleteingWordStart = 0
+			addServiceAutocomplete(request, response)
+			break
 		end
 	end
-
-	return false
-end
-
-local function updateResponse(request: Request, response: Response)
-	local isGloballyScoped = checkGlobalScope(response)
-
-	if not isGloballyScoped then
-		return
-	end
-
-	CompleteingLine = 0
-	CompleteingWordStart = 0
-	addServiceAutocomplete(request, response)
 end
 
 local function completionRequested(request: Request, response: Response)
 	local doc = request.textDocument.document
-	-- can't write to the command bar sadly ;C
-	if doc == nil or doc:IsCommandBar() then
+	if not doc or doc:IsCommandBar() then
 		return response
 	end
 
 	-- shares the response to another function
-	-- prevents the error where response isn't returned
 	updateResponse(request, response)
 
 	return response
@@ -442,25 +425,8 @@ end
 pcall(ScriptEditorService.DeregisterAutocompleteCallback, ScriptEditorService, PROCESS_NAME)
 ScriptEditorService:RegisterAutocompleteCallback(PROCESS_NAME, 10, completionRequested)
 
-local outputted = false
-while true do
-	local success, err = pcall(function()
-		ScriptEditorService.TextDocumentDidChange:Connect(onDocChanged)
-	end)
-
-	if success then
-		break
-	end
-
-	if not outputted then
-		if string.match(err, "denied script") then
-			warn("Script injection permissions are needed for the plugin to run please enable them in settings")
-			outputted = true
-		end
-	end
-
-	task.wait(1)
-end
+-- roblox will throw an output error and tell the user to enable script injection in settings if this fails to connect
+ScriptEditorService.TextDocumentDidChange:Connect(onDocChanged)
 
 game.ChildAdded:Connect(checkIfService)
 game.ChildRemoved:Connect(checkIfService)
