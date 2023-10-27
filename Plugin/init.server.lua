@@ -3,13 +3,11 @@ local ScriptEditorService = game:GetService("ScriptEditorService")
 local Lexer = require(script.lexer)
 local Settings = require(script.Settings)(plugin)
 
--- service names is not ideal but causes security checks if not used so :/
 local ServiceNames = {}
 
 local PROCESS_NAME = "Service Autocomplete by Baileyeatspizza"
 local LEARN_MORE_LINK = "https://create.roblox.com/docs/reference/engine/classes/"
 local SERVICE_DEF = 'local %s = game:GetService("%s")\n'
-
 local CHECKED_GLOBAL_VARIABLES = {
 	print = Enum.CompletionItemKind.Function,
 	_G = Enum.CompletionItemKind.Variable,
