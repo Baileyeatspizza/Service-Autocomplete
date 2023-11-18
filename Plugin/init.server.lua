@@ -2,8 +2,7 @@ local ScriptEditorService = game:GetService("ScriptEditorService")
 
 local Lexer = require(script.lexer)
 local Settings = require(script.Settings)(plugin)
-
-local ServiceNames = {}
+local ServiceNames = require(script.Services)
 
 local PROCESS_NAME = "Service Autocomplete by Baileyeatspizza"
 local LEARN_MORE_LINK = "https://create.roblox.com/docs/reference/engine/classes/"
@@ -62,37 +61,6 @@ type DocChanges = {
 	range: { start: { line: number, character: number }, ["end"]: { line: number, character: number } },
 	text: string,
 }
-
-local function isService(instance)
-	-- avoid unnamed instances
-	if instance.Name == "Instance" then
-		return false
-	end
-
-	-- it shouldn't be possible to create another service
-	-- prevents highest level user made instances from appearing
-	-- new instance should be cleared by garbage collector
-	local success = pcall(function()
-		return instance.new(instance.ClassName)
-	end)
-
-	if success then
-		return
-	end
-
-	return game:GetService(instance.ClassName)
-end
-
-local function checkIfService(instance)
-	local success, validService = pcall(isService, instance)
-	if success and validService then
-		ServiceNames[instance.ClassName] = true
-	else
-		pcall(function()
-			ServiceNames[instance.ClassName] = false
-		end)
-	end
-end
 
 -- used in a different function so it can return without ruining the callback
 local function addServiceAutocomplete(request: Request, response: Response)
@@ -179,14 +147,8 @@ local function getFullScript(doc: ScriptDocument)
 	return fullScriptString, rawSource
 end
 
-local cachedTokens = {}
 local function getAllTokens(doc: ScriptDocument)
 	local fullScriptString, rawSource = getFullScript(doc)
-
-	local cached = cachedTokens[rawSource]
-	if cached then
-		return cached
-	end
 
 	local currentLine = 1
 	local currentCharacter = 1
@@ -251,11 +213,6 @@ local function getAllTokens(doc: ScriptDocument)
 		})
 	until not type
 
-	cachedTokens[rawSource] = tokens
-	task.delay(10, function()
-		cachedTokens[rawSource] = nil
-	end)
-
 	return tokens
 end
 
@@ -273,9 +230,7 @@ local function findNonCommentLine(doc: ScriptDocument)
 	return lineAfterComments
 end
 
-local function findAllServices(doc: ScriptDocument, startLine: number?, endLine): { [string]: number }?
-	startLine = startLine or 0
-
+local function findAllServices(doc: ScriptDocument, startLine: number, endLine: number): { [string]: number }?
 	local services = {
 		--[ServiceName] = lineNumber
 	}
@@ -304,7 +259,6 @@ local function processDocChanges(doc: ScriptDocument, change: DocChanges)
 	end
 
 	local serviceName = change.text
-
 	if not ServiceNames[serviceName] or #serviceName < 3 then
 		return
 	end
@@ -317,7 +271,7 @@ local function processDocChanges(doc: ScriptDocument, change: DocChanges)
 	local lineToComplete = 1
 	local moved = false
 
-	local existingServices = findAllServices(doc, nil, change.range["end"].line - 1)
+	local existingServices = findAllServices(doc, 0, change.range["end"].line - 1)
 
 	if next(existingServices) then
 		for otherService, line in existingServices do
@@ -360,7 +314,7 @@ local function processDocChanges(doc: ScriptDocument, change: DocChanges)
 	end
 
 	if lastServiceLine == 1 then
-		lastServiceLine = lineToComplete + 1
+		lastServiceLine += 1
 	end
 
 	local docLineCount = doc:GetLineCount()
@@ -380,17 +334,13 @@ local function processDocChanges(doc: ScriptDocument, change: DocChanges)
 	doc:EditTextAsync(serviceRequire, lineToComplete, 1, 0, 0)
 end
 
-local function onDocChanged(doc: ScriptDocument, changed: { DocChanges })
-	if doc:IsCommandBar() or doc ~= CompletingDoc then
-		return
+pcall(ScriptEditorService.DeregisterAutocompleteCallback, ScriptEditorService, PROCESS_NAME)
+ScriptEditorService:RegisterAutocompleteCallback(PROCESS_NAME, 10, function(request: Request, response: Response)
+	local doc = request.textDocument.document
+	if not doc or doc:IsCommandBar() then
+		return response
 	end
 
-	for _, change in changed do
-		processDocChanges(doc, change)
-	end
-end
-
-local function updateResponse(request: Request, response: Response)
 	for _, v in response.items do
 		local expectedKind = CHECKED_GLOBAL_VARIABLES[v.label]
 		if expectedKind then
@@ -404,32 +354,20 @@ local function updateResponse(request: Request, response: Response)
 			break
 		end
 	end
-end
-
-local function completionRequested(request: Request, response: Response)
-	local doc = request.textDocument.document
-	if not doc or doc:IsCommandBar() then
-		return response
-	end
-
-	-- shares the response to another function
-	updateResponse(request, response)
 
 	return response
-end
-
--- prevent potential overlap for some reason errors if one doesn't exist weird api choice but ok-
-pcall(ScriptEditorService.DeregisterAutocompleteCallback, ScriptEditorService, PROCESS_NAME)
-ScriptEditorService:RegisterAutocompleteCallback(PROCESS_NAME, 10, completionRequested)
+end)
 
 -- roblox will throw an output error and tell the user to enable script injection in settings if this fails to connect
-ScriptEditorService.TextDocumentDidChange:Connect(onDocChanged)
+ScriptEditorService.TextDocumentDidChange:Connect(function(document: ScriptDocument, changesArray: { DocChanges })
+	if document:IsCommandBar() or document ~= CompletingDoc then
+		return
+	end
 
-game.ChildAdded:Connect(checkIfService)
-game.ChildRemoved:Connect(checkIfService)
-for _, v in game:GetChildren() do
-	checkIfService(v)
-end
+	for _, change in changesArray do
+		processDocChanges(document, change)
+	end
+end)
 
 plugin.Unloading:Connect(function()
 	pcall(ScriptEditorService.DeregisterAutocompleteCallback, ScriptEditorService, PROCESS_NAME)
