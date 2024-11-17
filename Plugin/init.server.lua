@@ -267,16 +267,16 @@ local function findNonCommentLine(doc: ScriptDocument)
 			break
 		end
 
-		lineAfterComments = token.endLine + 2
+		lineAfterComments = token.endLine + 1
 	end
 
 	return lineAfterComments
 end
 
-local function findAllServices(doc: ScriptDocument, startLine: number?, endLine): { [string]: number }?
+local function findAllServices(doc: ScriptDocument, startLine: number?, endLine)
 	startLine = startLine or 0
 
-	local services = {
+	local servicesFound = {
 		--[ServiceName] = lineNumber
 	}
 
@@ -285,17 +285,21 @@ local function findAllServices(doc: ScriptDocument, startLine: number?, endLine)
 			continue
 		end
 
+		-- token.type == "iden"
 		if token.type == "string" then
 			local cleanValue = string.match(token.value, "%w+")
 			if not ServiceNames[cleanValue] then
 				continue
 			end
 
-			services[cleanValue] = token.endLine
+			table.insert(servicesFound, {
+				ServiceIdentifier = cleanValue,
+				LineNumber = token.endLine,
+			})
 		end
 	end
 
-	return services
+	return servicesFound
 end
 
 local function processDocChanges(doc: ScriptDocument, change: DocChanges)
@@ -320,7 +324,17 @@ local function processDocChanges(doc: ScriptDocument, change: DocChanges)
 	local existingServices = findAllServices(doc, nil, change.range["end"].line - 1)
 
 	if next(existingServices) then
-		for otherService, line in existingServices do
+		for _, otherServiceData in existingServices do
+			local line = otherServiceData.LineNumber
+			local otherService = otherServiceData.ServiceIdentifier
+
+			local whiteSpaceStart, whiteSpaceEnd = string.find(doc:GetLine(line), "^%s+")
+
+			-- skip if theres indentation at the start
+			if whiteSpaceStart and (whiteSpaceEnd - whiteSpaceStart) >= 0 then
+				continue
+			end
+
 			-- hit a bug where its trying to duplicate a service
 			if otherService == serviceName then
 				return
@@ -342,9 +356,9 @@ local function processDocChanges(doc: ScriptDocument, change: DocChanges)
 		end
 
 		-- caused too many problems
-		for _, line in existingServices do
-			if line > lastServiceLine then
-				lastServiceLine = line
+		for _, otherServiceData in existingServices do
+			if otherServiceData.LineNumber > lastServiceLine then
+				lastServiceLine = otherServiceData.LineNumber
 			end
 		end
 
