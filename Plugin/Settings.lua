@@ -2,7 +2,7 @@ local SETTING_KEY = "ServiceAutoComplete"
 
 local Settings = {}
 
-local plugin: Plugin = nil
+local plugin: Plugin
 
 local ServiceSortingTypes = {
 	["Alphabetical"] = function(current, contender)
@@ -62,7 +62,7 @@ local function setSortType(input, secondInput)
 	plugin:SetSetting(SETTING_KEY .. "_SortType", newSortType)
 	print("Set auto complete sort type to: " .. newSortType)
 
-	return nil
+	return newSortType
 end
 
 -- expose to client
