@@ -112,6 +112,8 @@ Workspace
 ]]
 
 for service in string.gmatch(generatedList, "([%w]+)") do
+	service = string.gsub(service, "%s+", "")
+
 	if string.len(service) > 0 then
 		services[service] = true
 	end
