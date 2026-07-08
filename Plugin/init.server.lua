@@ -1,10 +1,5 @@
 local ScriptEditorService = game:GetService("ScriptEditorService")
 
-local Lexer = require(script.lexer)
-local Settings = require(script.Settings)(plugin)
-
-local ServiceNames = {}
-
 local PROCESS_NAME = "Service Autocomplete by Baileyeatspizza"
 local LEARN_MORE_LINK = "https://create.roblox.com/docs/reference/engine/classes/"
 local SERVICE_DEF = 'local %s = game:GetService("%s")\n'
@@ -15,6 +10,10 @@ local CHECKED_GLOBAL_VARIABLES = {
 	Vector3 = Enum.CompletionItemKind.Struct,
 	CFrame = Enum.CompletionItemKind.Struct,
 }
+
+local Lexer = require(script.lexer)
+local Settings = require(script.Settings)(plugin)
+local Services = require(script.services)
 
 local CompletingDoc = nil
 local CompleteingLine = 0
@@ -63,37 +62,6 @@ type DocChanges = {
 	text: string,
 }
 
-local function isService(instance)
-	-- avoid unnamed instances
-	if instance.Name == "Instance" then
-		return false
-	end
-
-	-- it shouldn't be possible to create another service
-	-- prevents highest level user made instances from appearing
-	-- new instance should be cleared by garbage collector
-	local success = pcall(function()
-		return instance.new(instance.ClassName)
-	end)
-
-	if success then
-		return
-	end
-
-	return game:GetService(instance.ClassName)
-end
-
-local function checkIfService(instance)
-	local success, validService = pcall(isService, instance)
-	if success and validService then
-		ServiceNames[instance.ClassName] = true
-	else
-		pcall(function()
-			ServiceNames[instance.ClassName] = false
-		end)
-	end
-end
-
 -- used in a different function so it can return without ruining the callback
 local function addServiceAutocomplete(request: Request, response: Response)
 	local doc = request.textDocument.document
@@ -110,7 +78,7 @@ local function addServiceAutocomplete(request: Request, response: Response)
 
 	local potentialMatches = {}
 
-	for serviceName in ServiceNames do
+	for serviceName in Services do
 		if string.sub(string.lower(serviceName), 1, #requestedWord) == string.lower(requestedWord) then
 			potentialMatches[serviceName] = true
 		end
@@ -288,7 +256,7 @@ local function findAllServices(doc: ScriptDocument, startLine: number?, endLine)
 		-- token.type == "iden"
 		if token.type == "string" then
 			local cleanValue = string.match(token.value, "%w+")
-			if not ServiceNames[cleanValue] then
+			if not Services[cleanValue] then
 				continue
 			end
 
@@ -309,7 +277,7 @@ local function processDocChanges(doc: ScriptDocument, change: DocChanges)
 
 	local serviceName = change.text
 
-	if not ServiceNames[serviceName] or #serviceName < 3 then
+	if not Services[serviceName] or #serviceName < 3 then
 		return
 	end
 
@@ -432,18 +400,12 @@ local function completionRequested(request: Request, response: Response)
 	return response
 end
 
--- prevent potential overlap for some reason errors if one doesn't exist weird api choice but ok-
+-- prevent potential overlap (will error if one doesn't exist)
 pcall(ScriptEditorService.DeregisterAutocompleteCallback, ScriptEditorService, PROCESS_NAME)
-ScriptEditorService:RegisterAutocompleteCallback(PROCESS_NAME, 10, completionRequested)
+ScriptEditorService:RegisterAutocompleteCallback(PROCESS_NAME, 100, completionRequested)
 
 -- roblox will throw an output error and tell the user to enable script injection in settings if this fails to connect
 ScriptEditorService.TextDocumentDidChange:Connect(onDocChanged)
-
-game.ChildAdded:Connect(checkIfService)
-game.ChildRemoved:Connect(checkIfService)
-for _, v in game:GetChildren() do
-	checkIfService(v)
-end
 
 plugin.Unloading:Connect(function()
 	pcall(ScriptEditorService.DeregisterAutocompleteCallback, ScriptEditorService, PROCESS_NAME)
