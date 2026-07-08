@@ -1,5 +1,16 @@
 local services = {}
 
+local ignoredServices = {
+	["CorePackages"] = true,
+	["RobloxReplicatedStorage"] = true,
+	["RobloxGui"] = true,
+	["RobloxReplicatedFirst"] = true,
+	["RobloxScriptSignalService"] = true,
+	["RobloxScriptSecurityService"] = true,
+	["RobloxScriptWebService"] = true,
+	["MemStorageService"] = true,
+}
+
 local generatedList = [[
 AdService
 AnalyticsService
@@ -45,6 +56,7 @@ LuaWebService
 MarketplaceService
 MaterialService
 MemStorageService
+MemoryStoreService
 MicroProfilerService
 ModerationService
 MouseService
@@ -111,11 +123,17 @@ VoiceChatService
 Workspace
 ]]
 
+local function addService(serviceName)
+	if not services[serviceName] and not ignoredServices[serviceName] then
+		services[serviceName] = true
+	end
+end
+
 for service in string.gmatch(generatedList, "([%w]+)") do
 	service = string.gsub(service, "%s+", "")
 
 	if string.len(service) > 0 then
-		services[service] = true
+		addService(service)
 	end
 end
 
@@ -142,7 +160,7 @@ end
 local function checkIfService(instance)
 	local success, validService = pcall(isService, instance)
 	if success and validService then
-		services[instance.ClassName] = true
+		addService(instance.ClassName)
 	else
 		pcall(function()
 			services[instance.ClassName] = false
